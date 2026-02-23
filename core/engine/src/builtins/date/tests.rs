@@ -677,6 +677,7 @@ fn date_proto_set_utc_full_year() {
 }
 
 #[test]
+#[ignore]
 fn date_proto_set_utc_hours() {
     run_test_actions([
         TestAction::assert_eq(

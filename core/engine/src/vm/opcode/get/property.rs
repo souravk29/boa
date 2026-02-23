@@ -19,9 +19,6 @@ fn get_by_name<const LENGTH: bool>(
             context.vm.set_register(dst.into(), value);
             return Ok(());
         } else if let Some(string) = object.as_string() {
-            // NOTE: Since we’re using the prototype returned directly by `base_class()`,
-            //       we need to handle string primitives separately due to the
-            //       string exotic internal methods.
             context
                 .vm
                 .set_register(dst.into(), (string.len() as u32).into());
@@ -29,17 +26,14 @@ fn get_by_name<const LENGTH: bool>(
         }
     }
 
-    // OPTIMIZATION:
-    //    Instead of calling `to_object()`, which creates a temporary wrapper object for primitive
-    //    values (e.g., numbers, strings, booleans) just to query their prototype chain.
-    //
-    //    To prevent the creation of a temporary JsObject, we directly retrieve the prototype that
-    //    `to_object()` would produce, such as `Number.prototype`, `String.prototype`, etc.
     let object = object.base_class(context)?;
 
     let ic = &context.vm.frame().code_block().ic[usize::from(index)];
     let object_borrowed = object.borrow();
-    if let Some((shape, slot)) = ic.match_or_reset(object_borrowed.shape()) {
+    let object_shape = object_borrowed.shape();
+
+    // Try inline cache for own properties
+    if let Some((shape, slot)) = ic.match_or_reset(object_shape) {
         let mut result = if slot.attributes.contains(SlotAttributes::PROTOTYPE) {
             let prototype = shape.prototype().expect("prototype should have value");
             let prototype = prototype.borrow();
@@ -60,20 +54,61 @@ fn get_by_name<const LENGTH: bool>(
         return Ok(());
     }
 
+    // Try inline cache for prototype properties (transitive prototype support)
+    if let Some((proto_obj, slot)) = ic.match_prototype_or_reset(object_shape) {
+        drop(object_borrowed);
+
+        let mut result = {
+            let proto_borrowed = proto_obj.borrow();
+            proto_borrowed.properties().storage[slot.index as usize].clone()
+        };
+
+        if slot.attributes.has_get() && result.is_object() {
+            result =
+                result
+                    .as_object()
+                    .expect("should contain getter")
+                    .call(receiver, &[], context)?;
+        }
+        context.vm.set_register(dst.into(), result);
+        return Ok(());
+    }
     drop(object_borrowed);
 
     let key: PropertyKey = ic.name.clone().into();
 
-    let context = &mut InternalMethodPropertyContext::new(context);
-    let result = object.__get__(&key, receiver.clone(), context)?;
+    let ic_context = &mut InternalMethodPropertyContext::new(context);
+    let result = object.__get__(&key, receiver.clone(), ic_context)?;
 
-    // Cache the property.
-    let slot = *context.slot();
+    // Cache the property
+    let slot = *ic_context.slot();
     if slot.is_cacheable() {
-        let ic = &context.vm.frame().code_block.ic[usize::from(index)];
+        let code_block_ic = &ic_context.vm.frame().code_block.ic[usize::from(index)];
         let object_borrowed = object.borrow();
-        let shape = object_borrowed.shape();
-        ic.set(shape, slot);
+        let object_shape = object_borrowed.shape();
+
+        if slot.attributes.contains(SlotAttributes::PROTOTYPE) {
+            // Property found in prototype chain - walk to find which prototype has it
+            let mut current_proto = object_shape.prototype();
+
+            while let Some(proto) = current_proto {
+                let proto_borrowed = proto.borrow();
+                let proto_shape = proto_borrowed.shape();
+
+                // Check if this prototype has the property
+                if proto_shape.lookup(&key).is_some() {
+                    // Cache with both object and prototype shapes
+                    code_block_ic.set_prototype(object_shape, &proto, slot);
+                    break;
+                }
+
+                // Move to next level in prototype chain
+                current_proto = proto_shape.prototype();
+            }
+        } else {
+            // Own property - cache normally
+            code_block_ic.set(object_shape, slot);
+        }
     }
 
     context.vm.set_register(dst.into(), result);

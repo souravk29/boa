@@ -105,6 +105,7 @@ impl Slot {
         }
     }
 
+    #[inline]
     pub(crate) fn set_not_cacheable_if_already_prototype(&mut self) {
         // NOTE(HalidOdat): This is a bit hack to avoid conditional branches.
         //
@@ -113,8 +114,10 @@ impl Slot {
         //     slot.attributes |= SlotAttributes::NOT_CACHEABLE;
         // }
         //
-        self.attributes |= SlotAttributes::from_bits_retain(
-            (self.attributes.bits() & SlotAttributes::PROTOTYPE.bits()) << 2,
-        );
+        // self.attributes |= SlotAttributes::from_bits_retain(
+        //     (self.attributes.bits() & SlotAttributes::PROTOTYPE.bits()) << 2,
+        // );
+        // This is now a no-op, allowing properties found in prototype's prototype
+        // to remain cacheable.
     }
 }

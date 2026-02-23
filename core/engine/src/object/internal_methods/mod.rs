@@ -687,7 +687,6 @@ pub(crate) fn ordinary_has_property(
         // 4. Let parent be ? O.[[GetPrototypeOf]]().
         let parent = obj.__get_prototype_of__(context)?;
 
-        context.slot().set_not_cacheable_if_already_prototype();
         context.slot().attributes |= SlotAttributes::PROTOTYPE;
 
         parent
@@ -717,7 +716,6 @@ pub(crate) fn ordinary_get(
         None => {
             // a. Let parent be ? O.[[GetPrototypeOf]]().
             if let Some(parent) = obj.__get_prototype_of__(context)? {
-                context.slot().set_not_cacheable_if_already_prototype();
                 context.slot().attributes |= SlotAttributes::PROTOTYPE;
 
                 // c. Return ? parent.[[Get]](P, Receiver).
@@ -770,7 +768,6 @@ pub(crate) fn ordinary_try_get(
         None => {
             // a. Let parent be ? O.[[GetPrototypeOf]]().
             if let Some(parent) = obj.__get_prototype_of__(context)? {
-                context.slot().set_not_cacheable_if_already_prototype();
                 context.slot().attributes |= SlotAttributes::PROTOTYPE;
 
                 // c. Return ? parent.[[Get]](P, Receiver).
